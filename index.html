@@ -211,6 +211,11 @@ textarea:focus,input:focus,select:focus{outline:none;border-color:#94a3b8}
 
       <div id="bulk-summary" style="display:none;background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:13px;color:#15803d"></div>
 
+      <div style="background:#eff6ff;border:1px solid #93c5fd;border-radius:10px;padding:1rem;margin-bottom:16px">
+        <div style="font-size:13px;font-weight:600;color:#1d4ed8;margin-bottom:4px">☁️ Cloud sync key</div>
+        <div style="font-size:12px;color:#3b82f6;margin-bottom:8px">Pick a secret key to sync your data across devices. Write it down — you'll need it to restore on a new device.</div>
+        <input id="bulk-sync-key" placeholder="e.g. smith-properties-2024" style="background:white"/>
+      </div>
       <button class="btn-primary" onclick="finishBulkImport()">Import all properties & open app ✓</button>
     </div>
 
@@ -243,6 +248,12 @@ textarea:focus,input:focus,select:focus{outline:none;border-color:#94a3b8}
       <div style="margin-bottom:12px">
         <div class="section-label">Company / brokerage name (optional)</div>
         <input id="ob-company" placeholder="e.g. Acme Property Management"/>
+      </div>
+      <div style="background:#eff6ff;border:1px solid #93c5fd;border-radius:10px;padding:1rem;margin-bottom:12px">
+        <div style="font-size:13px;font-weight:600;color:#1d4ed8;margin-bottom:4px">☁️ Cloud sync key</div>
+        <div style="font-size:12px;color:#3b82f6;margin-bottom:8px">Pick a secret key to sync your data across devices. Write it down — you'll need it to restore on a new device.</div>
+        <input id="ob-sync-key" placeholder="e.g. smith-properties-2024" style="background:white"/>
+        <div style="font-size:11px;color:#64748b;margin-top:4px">Use something memorable but unique. No spaces.</div>
       </div>
       <button class="btn-primary" onclick="onboardingNext(1)" style="margin-top:4px">Continue →</button>
     </div>
@@ -321,6 +332,7 @@ textarea:focus,input:focus,select:focus{outline:none;border-color:#94a3b8}
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <select id="property-select" onchange="switchProperty(this.value)" style="font-size:12px;background:#e8f5ee;color:#1a6b3c;padding:5px 10px;border-radius:99px;font-weight:600;border:none;cursor:pointer;font-family:inherit;max-width:260px"></select>
       <button onclick="startAddProperty()" style="font-size:11px;font-weight:700;padding:5px 11px;background:#0f172a;color:white;border:none;border-radius:99px;cursor:pointer;font-family:inherit;white-space:nowrap">+ Add property</button>
+      <span id="sync-status" style="font-size:11px;color:#94a3b8;white-space:nowrap" title="Cloud sync">☁️</span>
     </div>
   </div>
   <div class="tabs">
@@ -666,6 +678,19 @@ textarea:focus,input:focus,select:focus{outline:none;border-color:#94a3b8}
       </div>
       <div id="import-result" style="margin-top:8px;font-size:12px"></div>
     </div>
+
+    <!-- Cloud sync settings -->
+    <div class="card" style="border:1px solid #93c5fd;background:#eff6ff">
+      <div style="font-size:13px;font-weight:700;color:#1d4ed8;margin-bottom:6px">☁️ Cloud sync</div>
+      <div style="font-size:12px;color:#3b82f6;margin-bottom:10px">Your data syncs automatically to the cloud using your sync key. Use the same key on any device to access your data.</div>
+      <div id="sync-key-display" style="margin-bottom:10px"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button onclick="manualSync()" style="padding:8px 14px;font-size:12px;font-weight:600;font-family:inherit;background:#1d4ed8;color:white;border:none;border-radius:8px;cursor:pointer">Sync now</button>
+        <button onclick="showChangeSyncKey()" style="padding:8px 14px;font-size:12px;font-weight:600;font-family:inherit;background:#eff6ff;color:#1d4ed8;border:1px solid #93c5fd;border-radius:8px;cursor:pointer">Change sync key</button>
+        <button onclick="showRestoreFromCloud()" style="padding:8px 14px;font-size:12px;font-weight:600;font-family:inherit;background:#eff6ff;color:#1d4ed8;border:1px solid #93c5fd;border-radius:8px;cursor:pointer">Restore from cloud</button>
+      </div>
+      <div id="cloud-sync-result" style="margin-top:8px;font-size:12px"></div>
+    </div>
   </div>
 
   <!-- OWNER REPORT TAB -->
@@ -701,6 +726,74 @@ textarea:focus,input:focus,select:focus{outline:none;border-color:#94a3b8}
 const STORAGE_KEY = 'maintenanceai_v2';
 let state = { properties: {}, activePropertyId: null };
 
+// ══════════════════════════════════════════
+// SUPABASE CLOUD SYNC
+// ══════════════════════════════════════════
+const SB_URL = 'https://muascqnlwwijmifsqdic.supabase.co';
+const SB_KEY = 'sb_publishable_2lHUemABajaLRmsE221E4Q_lyegGjkO';
+let syncKey = null;
+let syncDebounceTimer = null;
+let syncStatus = 'idle'; // idle | syncing | saved | error
+
+function getSyncKey(){ return localStorage.getItem('maintenanceai_sync_key') || null; }
+function setSyncKey(k){ localStorage.setItem('maintenanceai_sync_key', k); syncKey = k; }
+
+function setSyncStatus(status, msg){
+  syncStatus = status;
+  const el = document.getElementById('sync-status');
+  if(!el) return;
+  const icons = { idle:'☁️', syncing:'⟳', saved:'✓', error:'⚠' };
+  const colors = { idle:'#94a3b8', syncing:'#3b82f6', saved:'#15803d', error:'#b91c1c' };
+  el.style.color = colors[status] || '#94a3b8';
+  el.title = msg || status;
+  el.textContent = (icons[status]||'☁️') + ' ' + (msg || '');
+}
+
+async function syncToSupabase(){
+  const key = getSyncKey();
+  if(!key) return;
+  setSyncStatus('syncing', 'Saving...');
+  try{
+    const payload = { sync_key: key, data: state, updated_at: new Date().toISOString() };
+    const res = await fetch(SB_URL + '/rest/v1/user_data', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SB_KEY,
+        'Authorization': 'Bearer ' + SB_KEY,
+        'Prefer': 'resolution=merge-duplicates'
+      },
+      body: JSON.stringify(payload)
+    });
+    if(!res.ok){ const t=await res.text(); throw new Error(t); }
+    setSyncStatus('saved', 'Saved to cloud');
+    setTimeout(()=>setSyncStatus('idle',''),3000);
+  } catch(e){
+    setSyncStatus('error', 'Sync failed');
+    console.error('Supabase sync error:', e);
+  }
+}
+
+async function loadFromSupabase(key){
+  try{
+    const res = await fetch(SB_URL + '/rest/v1/user_data?sync_key=eq.' + encodeURIComponent(key) + '&select=data', {
+      headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY }
+    });
+    if(!res.ok) throw new Error('Network error');
+    const rows = await res.json();
+    if(rows && rows.length > 0 && rows[0].data) return rows[0].data;
+    return null;
+  } catch(e){
+    console.error('Supabase load error:', e);
+    return null;
+  }
+}
+
+function scheduleSyncToSupabase(){
+  clearTimeout(syncDebounceTimer);
+  syncDebounceTimer = setTimeout(syncToSupabase, 2000);
+}
+
 function prop(){ return state.properties[state.activePropertyId]; }
 function P(){ return prop().info; }
 function T(){ return prop().tenants; }
@@ -710,7 +803,10 @@ function PM(){ return prop().pmTasks; }
 function MH(){ return prop().maintenanceHistory; }
 function BP(){ return prop().bidProjects; }
 
-function saveData(){ try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){} }
+function saveData(){
+  try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){}
+  if(getSyncKey()) scheduleSyncToSupabase();
+}
 
 function loadData(){
   try{
@@ -884,6 +980,8 @@ function finishOnboarding(){
   state.properties[id].vendors=importedVendors;
   state.activePropertyId=id;
   importedTenants=[];importedVendors=[];
+  const sk=(document.getElementById('ob-sync-key').value||'').trim().replace(/\s+/g,'-');
+  if(sk) setSyncKey(sk);
   saveData();
   launchApp();
 }
@@ -1124,6 +1222,8 @@ function finishBulkImport(){
     state.properties[id].vendors=[...bulkImportData.vendors];
   });
   state.activePropertyId=firstId;
+  const sk=(document.getElementById('bulk-sync-key').value||'').trim().replace(/\s+/g,'-');
+  if(sk) setSyncKey(sk);
   saveData();
   launchApp();
 }
@@ -1159,7 +1259,8 @@ function savePropertyInfo(){
 
 // ── INIT ──
 (function init(){
-  const hasData=loadData();
+  syncKey = getSyncKey();
+  const hasData = loadData();
   if(hasData && Object.keys(state.properties).length > 0){
     document.getElementById('main-app').style.display='block';
     const now=new Date(),y=now.getFullYear(),m=now.getMonth();
@@ -1167,10 +1268,72 @@ function savePropertyInfo(){
     document.getElementById('rpt-end').value=now.toISOString().split('T')[0];
     refreshAppForProperty();
   } else {
-    document.getElementById('onboarding-overlay').style.display='flex';
-    showOnboardingStep(0);
+    // Check if there's a sync key saved but no local data — offer cloud restore
+    if(syncKey){
+      showCloudRestorePrompt();
+    } else {
+      document.getElementById('onboarding-overlay').style.display='flex';
+      showOnboardingStep(0);
+    }
   }
 })();
+
+function showCloudRestorePrompt(){
+  document.getElementById('onboarding-overlay').style.display='flex';
+  // Show a special restore screen
+  ['0','1','2','3','bulk'].forEach(i=>{
+    const el=document.getElementById('ostep-body-'+i);
+    if(el) el.style.display='none';
+  });
+  document.getElementById('onboarding-steps-tabs').style.display='none';
+  const body = document.createElement('div');
+  body.className = 'onboarding-body';
+  body.id = 'ostep-body-restore';
+  body.innerHTML = `
+    <div style="text-align:center;padding:1rem 0">
+      <div style="font-size:40px;margin-bottom:12px">☁️</div>
+      <div style="font-size:15px;font-weight:700;color:#0f172a;margin-bottom:6px">Restore your data?</div>
+      <div style="font-size:13px;color:#64748b;margin-bottom:20px">We found a sync key saved on this device (<strong>${syncKey}</strong>). Load your data from the cloud?</div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <button onclick="restoreFromCloud()" class="btn-primary" style="margin-top:0">Restore from cloud</button>
+        <button onclick="startFresh()" style="padding:10px;font-size:13px;font-weight:600;font-family:inherit;background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer">Start fresh instead</button>
+      </div>
+      <div id="restore-status" style="margin-top:12px;font-size:13px"></div>
+    </div>`;
+  document.querySelector('.onboarding-modal').appendChild(body);
+}
+
+async function restoreFromCloud(){
+  const btn = document.querySelector('#ostep-body-restore .btn-primary');
+  const status = document.getElementById('restore-status');
+  if(btn){ btn.disabled=true; btn.textContent='Restoring...'; }
+  status.innerHTML = '<div style="color:#3b82f6">Loading from cloud...</div>';
+  const data = await loadFromSupabase(syncKey);
+  if(data && data.properties && Object.keys(data.properties).length > 0){
+    state = data;
+    if(!state.activePropertyId || !state.properties[state.activePropertyId])
+      state.activePropertyId = Object.keys(state.properties)[0];
+    saveData();
+    document.getElementById('onboarding-overlay').style.display='none';
+    document.getElementById('main-app').style.display='block';
+    const now=new Date(),y=now.getFullYear(),m=now.getMonth();
+    document.getElementById('rpt-start').value=new Date(y,m,1).toISOString().split('T')[0];
+    document.getElementById('rpt-end').value=now.toISOString().split('T')[0];
+    refreshAppForProperty();
+  } else {
+    status.innerHTML = '<div style="color:#b91c1c">No data found for that sync key. Starting fresh.</div>';
+    setTimeout(()=>startFresh(), 2000);
+  }
+}
+
+function startFresh(){
+  localStorage.removeItem('maintenanceai_sync_key');
+  syncKey = null;
+  const restore = document.getElementById('ostep-body-restore');
+  if(restore) restore.remove();
+  document.getElementById('onboarding-overlay').style.display='flex';
+  showOnboardingStep(0);
+}
 
 // ══════════════════════════════════════════
 // CORE APP FUNCTIONS
@@ -1197,7 +1360,7 @@ function switchTab(name){
   if(name==='queue')renderQueue();
   if(name==='history')renderHistory();
   if(name==='logcall')initCallLog();
-  if(name==='directory')renderDirectory();
+  if(name==='directory'){renderDirectory();renderSyncKeyDisplay();}
   if(name==='bids'){renderBidVendorList();renderBidProjects();}
 }
 
@@ -1213,15 +1376,29 @@ async function handleScreenshot(file){
   try{
     const base64=await compressImage(file,600,0.5);
     resultDiv.innerHTML='<div class="loading-row"><div class="spinner"></div>Analyzing with AI...</div>';
-    const tenantList=T().length
-      ?T().map(t=>t.contact+' (Unit '+t.unit+', '+t.business+', '+t.email+', '+t.cell_phone+')').join('\n')
+
+    // Build a full tenant list across ALL properties so the AI can match any tenant
+    const allTenants=[];
+    Object.entries(state.properties).forEach(([propId,propData])=>{
+      (propData.tenants||[]).forEach(t=>{
+        allTenants.push({
+          propId, propName:propData.info.address,
+          unit:t.unit, contact:t.contact, business:t.business||'',
+          email:t.email||'', cell_phone:t.cell_phone||''
+        });
+      });
+    });
+    const tenantList=allTenants.length
+      ?allTenants.map(t=>t.contact+' (Unit '+t.unit+', '+t.business+', '+t.email+', '+t.cell_phone+') @ '+t.propName).join('\n')
       :'No tenants on file';
+    const propertyList=Object.values(state.properties).map(p=>p.info.address).join(', ');
+
     const res=await fetch('https://api.anthropic.com/v1/messages',{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1500,
         messages:[{role:'user',content:[
           {type:'image',source:{type:'base64',media_type:'image/jpeg',data:base64}},
-          {type:'text',text:'You are a property management AI for '+P().address+'. Read this image and extract ALL maintenance issues.\n\nTenant list:\n'+tenantList+'\n\nMatch sender to tenant list. If no match use "Unknown".\n\nReturn ONLY valid JSON:\n{"matched_tenant_unit":"unit or Unknown","matched_tenant_name":"name or Unknown","sender_info":"what you saw","issues":[{"title":"short title","description":"full details","category":"plumbing|hvac|electrical|locksmith|fire|general","priority":"urgent|normal|low","recommended_action":"what vendor should do","estimated_cost":"e.g. $150-$300"}]}'}
+          {type:'text',text:'You are a property management AI managing these properties: '+propertyList+'.\n\nRead this image (email, text, or voicemail screenshot) and extract ALL maintenance issues.\n\nFull tenant list across all properties:\n'+tenantList+'\n\nMatch the sender to the closest tenant by name, email, phone, or any detail visible in the message. Also identify which property they belong to.\n\nReturn ONLY valid JSON:\n{"matched_tenant_unit":"unit or Unknown","matched_tenant_name":"name or Unknown","matched_property":"exact property address or Unknown","sender_info":"what you saw","issues":[{"title":"short title","description":"full details","category":"plumbing|hvac|electrical|locksmith|fire|general","priority":"urgent|normal|low","recommended_action":"what vendor should do","estimated_cost":"e.g. $150-$300"}]}'}
         ]}]
       })
     });
@@ -1233,12 +1410,53 @@ async function handleScreenshot(file){
     catch(e1){
       const m=rawText.match(/\{[\s\S]*\}/);
       if(m)parsed=JSON.parse(m[0]);
-      else parsed={matched_tenant_unit:'Unknown',matched_tenant_name:'Unknown',sender_info:'Could not parse',issues:[{title:'Maintenance request',description:rawText.substring(0,300),category:'general',priority:'normal',recommended_action:'Review and add details manually'}]};
+      else parsed={matched_tenant_unit:'Unknown',matched_tenant_name:'Unknown',matched_property:'Unknown',sender_info:'Could not parse',issues:[{title:'Maintenance request',description:rawText.substring(0,300),category:'general',priority:'normal',recommended_action:'Review and add details manually'}]};
     }
-    const matchedTenant=T().find(t=>t.unit===parsed.matched_tenant_unit)||null;
+
+    // Find which property and tenant was matched
+    let matchedPropId=state.activePropertyId;
+    let matchedTenant=null;
+
+    // Try to match by property first, then tenant
+    if(parsed.matched_property && parsed.matched_property!=='Unknown'){
+      const propEntry=Object.entries(state.properties).find(([id,p])=>
+        p.info.address.toLowerCase().includes(parsed.matched_property.toLowerCase()) ||
+        parsed.matched_property.toLowerCase().includes(p.info.address.toLowerCase())
+      );
+      if(propEntry) matchedPropId=propEntry[0];
+    }
+
+    // Find tenant in matched property
+    const matchProp=state.properties[matchedPropId];
+    if(matchProp && parsed.matched_tenant_unit && parsed.matched_tenant_unit!=='Unknown'){
+      matchedTenant=matchProp.tenants.find(t=>t.unit===parsed.matched_tenant_unit)||null;
+    }
+    // If not found, search all properties
+    if(!matchedTenant && parsed.matched_tenant_name && parsed.matched_tenant_name!=='Unknown'){
+      for(const [pid,pdata] of Object.entries(state.properties)){
+        const found=pdata.tenants.find(t=>
+          t.contact.toLowerCase().includes(parsed.matched_tenant_name.toLowerCase()) ||
+          parsed.matched_tenant_name.toLowerCase().includes(t.contact.toLowerCase())
+        );
+        if(found){ matchedTenant=found; matchedPropId=pid; break; }
+      }
+    }
+
+    // Switch to matched property if different
+    const switchedProperty = matchedPropId !== state.activePropertyId;
+    if(switchedProperty){
+      state.activePropertyId=matchedPropId;
+      refreshAppForProperty();
+    }
+
+    const propSwitchNote = switchedProperty
+      ? '<div style="background:#eff6ff;border:1px solid #93c5fd;border-radius:8px;padding:8px 12px;margin-bottom:8px;font-size:12px;color:#1d4ed8">📍 Switched to <strong>'+P().address+'</strong> — tenant found at this property</div>'
+      : '';
+
     matchDiv.innerHTML=matchedTenant
-      ?'<div class="match-card"><div class="match-title">Tenant matched — Unit '+matchedTenant.unit+'</div><div class="match-detail">'+matchedTenant.contact+' · '+matchedTenant.business+'</div></div>'
-      :'<div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:10px;padding:.75rem 1rem;margin:.75rem 0;font-size:12px;color:#92400e"><strong>Sender: '+parsed.sender_info+'</strong> — not matched to a tenant. Edit in queue to assign.</div>';
+      ?propSwitchNote+'<div class="match-card"><div class="match-title">Tenant matched — Unit '+matchedTenant.unit+' · '+P().address+'</div><div class="match-detail">'+matchedTenant.contact+' · '+matchedTenant.business+'</div></div>'
+      :propSwitchNote+'<div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:10px;padding:.75rem 1rem;margin:.75rem 0;font-size:12px;color:#92400e"><strong>Sender: '+parsed.sender_info+'</strong> — not matched to a tenant. Edit in queue to assign.</div>';
+
     const issues=(parsed.issues&&parsed.issues.length)?parsed.issues:[{title:'Maintenance request',description:'See image for details',category:'general',priority:'normal',recommended_action:'Review and assess'}];
     const newWOs=issues.map(issue=>{
       const vendor=matchVendor(issue.category);
@@ -1780,6 +1998,72 @@ function downloadWOPDF(woId){
   win.document.write('<!DOCTYPE html><html><head><title>Work Order '+wo.id+'</title><style>body{font-family:Arial,sans-serif;padding:40px;max-width:720px;margin:0 auto;color:#0f172a}h1{font-size:20px;font-weight:700;margin-bottom:2px}.sub{font-size:12px;color:#64748b;margin-bottom:24px}.badge{display:inline-block;padding:4px 12px;border-radius:99px;font-size:12px;font-weight:700;margin-bottom:20px}table{width:100%;border-collapse:collapse;margin-bottom:20px}td{padding:10px 12px;border-bottom:1px solid #e2e8f0;font-size:13px;vertical-align:top}td:first-child{font-weight:600;color:#64748b;width:38%}.section{font-size:11px;font-weight:700;text-transform:uppercase;color:#64748b;margin:20px 0 8px;border-bottom:2px solid #e2e8f0;padding-bottom:6px}.footer{margin-top:32px;padding-top:14px;border-top:1px solid #e2e8f0;font-size:11px;color:#94a3b8;text-align:center}.pb{margin-bottom:24px;padding:10px 22px;background:#0f172a;color:white;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer}@media print{.pb{display:none!important}}</style></head><body><button class="pb" onclick="window.print()">Print / Save as PDF</button><h1>Work Order — '+wo.id+'</h1><div class="sub">'+P().address+' · '+wo.date+'</div><span class="badge" style="background:'+(wo.priority==='urgent'?'#fef2f2;color:#b91c1c':wo.priority==='normal'?'#f0fdf4;color:#15803d':'#fffbeb;color:#b45309')+'">'+wo.priority.toUpperCase()+' PRIORITY</span><div class="section">Request details</div><table><tr><td>Work order #</td><td>'+wo.id+'</td></tr><tr><td>Tenant</td><td>'+wo.tenant+(wo.business?' — '+wo.business:'')+'</td></tr><tr><td>Unit</td><td>'+wo.unit+'</td></tr><tr><td>Issue</td><td>'+wo.issue_summary+'</td></tr><tr><td>Category</td><td>'+wo.category+'</td></tr><tr><td>Recommended action</td><td>'+wo.recommended_action+'</td></tr><tr><td>Access required</td><td>'+(wo.access_needed?'Yes — coordinate with tenant':'No')+'</td></tr>'+(wo.notes_for_vendor?'<tr><td>Notes</td><td>'+wo.notes_for_vendor+'</td></tr>':'')+(wo.estimatedCost?'<tr><td>Estimated cost</td><td style="font-weight:600;color:#15803d">'+wo.estimatedCost+'</td></tr>':'')+'<tr><td>Status</td><td style="color:'+color+';font-weight:700">'+sl+'</td></tr></table><div class="section">Vendor assignment</div><table><tr><td>Vendor</td><td>'+wo.vendor.name+'</td></tr><tr><td>Contact</td><td>'+wo.vendor.contact+'</td></tr><tr><td>Phone</td><td>'+wo.vendor.phone+'</td></tr><tr><td>Email</td><td>'+wo.vendor.email+'</td></tr></table><div class="footer">MaintenanceAI · '+P().address+'<br>'+mgr+'</div></body></html>');
   win.document.close();
   wo.status='approved';saveData();updateQueueCount();
+}
+
+// ── CLOUD SYNC HELPERS ──
+function renderSyncKeyDisplay(){
+  const el = document.getElementById('sync-key-display');
+  if(!el) return;
+  const k = getSyncKey();
+  if(k){
+    el.innerHTML = '<div style="font-size:12px;color:#0f172a">Current sync key: <strong style="font-family:monospace;background:#dbeafe;padding:2px 8px;border-radius:4px">'+k+'</strong></div>';
+  } else {
+    el.innerHTML = '<div style="font-size:12px;color:#b91c1c">No sync key set — data is local only.</div>';
+  }
+}
+
+function manualSync(){
+  const el = document.getElementById('cloud-sync-result');
+  if(!getSyncKey()){
+    showChangeSyncKey();
+    return;
+  }
+  el.innerHTML = '<span style="color:#3b82f6">Syncing...</span>';
+  syncToSupabase().then(()=>{
+    el.innerHTML = '<span style="color:#15803d">✓ Synced successfully</span>';
+    setTimeout(()=>el.innerHTML='', 3000);
+  });
+}
+
+function showChangeSyncKey(){
+  const el = document.getElementById('cloud-sync-result');
+  const current = getSyncKey() || '';
+  el.innerHTML = '<div style="margin-top:8px"><div style="font-size:12px;font-weight:600;color:#0f172a;margin-bottom:4px">Enter new sync key:</div><div style="display:flex;gap:6px"><input id="new-sync-key-input" value="'+current+'" placeholder="my-properties-2024" style="flex:1;padding:7px 10px;font-size:12px;font-family:inherit;background:white;border:1px solid #93c5fd;border-radius:6px"/><button onclick="saveNewSyncKey()" style="padding:7px 14px;font-size:12px;font-weight:600;font-family:inherit;background:#1d4ed8;color:white;border:none;border-radius:6px;cursor:pointer">Save</button></div><div style="font-size:11px;color:#64748b;margin-top:4px">Changing your key will sync all data to the new key.</div></div>';
+}
+
+function saveNewSyncKey(){
+  const input = document.getElementById('new-sync-key-input');
+  if(!input) return;
+  const k = input.value.trim().replace(/\s+/g,'-');
+  if(!k){ alert('Please enter a sync key.'); return; }
+  setSyncKey(k);
+  syncToSupabase();
+  renderSyncKeyDisplay();
+  const el = document.getElementById('cloud-sync-result');
+  el.innerHTML = '<span style="color:#15803d">✓ Sync key updated and data synced</span>';
+  setTimeout(()=>el.innerHTML='', 3000);
+}
+
+async function showRestoreFromCloud(){
+  const el = document.getElementById('cloud-sync-result');
+  const k = prompt('Enter your sync key to restore from cloud:', getSyncKey()||'');
+  if(!k) return;
+  el.innerHTML = '<span style="color:#3b82f6">Loading from cloud...</span>';
+  const data = await loadFromSupabase(k.trim());
+  if(data && data.properties && Object.keys(data.properties).length > 0){
+    if(!confirm('Found '+Object.keys(data.properties).length+' propert'+(Object.keys(data.properties).length!==1?'ies':'y')+' in cloud. Replace current local data?')) return;
+    state = data;
+    if(!state.activePropertyId || !state.properties[state.activePropertyId])
+      state.activePropertyId = Object.keys(state.properties)[0];
+    setSyncKey(k.trim());
+    saveData();
+    refreshAppForProperty();
+    renderSyncKeyDisplay();
+    el.innerHTML = '<span style="color:#15803d">✓ Restored successfully</span>';
+    setTimeout(()=>el.innerHTML='', 3000);
+  } else {
+    el.innerHTML = '<span style="color:#b91c1c">No data found for that sync key.</span>';
+  }
 }
 
 function formatPhone(p){const d=(p||'').replace(/\D/g,'');return d.length===10?'('+d.slice(0,3)+') '+d.slice(3,6)+'-'+d.slice(6):p||'';}
