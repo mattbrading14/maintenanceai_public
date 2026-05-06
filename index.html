@@ -211,11 +211,6 @@ textarea:focus,input:focus,select:focus{outline:none;border-color:#94a3b8}
 
       <div id="bulk-summary" style="display:none;background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:13px;color:#15803d"></div>
 
-      <div style="background:#eff6ff;border:1px solid #93c5fd;border-radius:10px;padding:1rem;margin-bottom:16px">
-        <div style="font-size:13px;font-weight:600;color:#1d4ed8;margin-bottom:4px">☁️ Cloud sync key</div>
-        <div style="font-size:12px;color:#3b82f6;margin-bottom:8px">Pick a secret key to sync your data across devices. Write it down — you'll need it to restore on a new device.</div>
-        <input id="bulk-sync-key" placeholder="e.g. smith-properties-2024" style="background:white"/>
-      </div>
       <button class="btn-primary" onclick="finishBulkImport()">Import all properties & open app ✓</button>
     </div>
 
@@ -242,18 +237,12 @@ textarea:focus,input:focus,select:focus{outline:none;border-color:#94a3b8}
         </div>
       </div>
       <div style="margin-bottom:12px">
-        <div class="section-label">Manager email</div>
-        <input id="ob-email" placeholder="you@company.com" type="email"/>
+        <div class="section-label">Manager email *</div>
+        <input id="ob-email" placeholder="you@company.com" type="email" required/>
       </div>
       <div style="margin-bottom:12px">
         <div class="section-label">Company / brokerage name (optional)</div>
         <input id="ob-company" placeholder="e.g. Acme Property Management"/>
-      </div>
-      <div style="background:#eff6ff;border:1px solid #93c5fd;border-radius:10px;padding:1rem;margin-bottom:12px">
-        <div style="font-size:13px;font-weight:600;color:#1d4ed8;margin-bottom:4px">☁️ Cloud sync key</div>
-        <div style="font-size:12px;color:#3b82f6;margin-bottom:8px">Pick a secret key to sync your data across devices. Write it down — you'll need it to restore on a new device.</div>
-        <input id="ob-sync-key" placeholder="e.g. smith-properties-2024" style="background:white"/>
-        <div style="font-size:11px;color:#64748b;margin-top:4px">Use something memorable but unique. No spaces.</div>
       </div>
       <button class="btn-primary" onclick="onboardingNext(1)" style="margin-top:4px">Continue →</button>
     </div>
@@ -682,7 +671,7 @@ textarea:focus,input:focus,select:focus{outline:none;border-color:#94a3b8}
     <!-- Cloud sync settings -->
     <div class="card" style="border:1px solid #93c5fd;background:#eff6ff">
       <div style="font-size:13px;font-weight:700;color:#1d4ed8;margin-bottom:6px">☁️ Cloud sync</div>
-      <div style="font-size:12px;color:#3b82f6;margin-bottom:10px">Your data syncs automatically to the cloud using your sync key. Use the same key on any device to access your data.</div>
+      <div style="font-size:12px;color:#3b82f6;margin-bottom:10px">Your data syncs automatically using your email address. Sign in with the same email on any device to access your data.</div>
       <div id="sync-key-display" style="margin-bottom:10px"></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button onclick="manualSync()" style="padding:8px 14px;font-size:12px;font-weight:600;font-family:inherit;background:#1d4ed8;color:white;border:none;border-radius:8px;cursor:pointer">Sync now</button>
@@ -946,7 +935,9 @@ function onboardingNext(step){
   if(step===1){
     const addr=document.getElementById('ob-address').value.trim();
     const mgr=document.getElementById('ob-manager').value.trim();
+    const email1=document.getElementById('ob-email').value.trim();
     if(!addr||!mgr){alert('Please enter a property address and your name.');return;}
+    if(!email1){alert('Please enter your email address. It is used to sync your data across devices.');return;}
     // Store temporarily for use in finishOnboarding
     document.getElementById('ostep-1').classList.add('done');
     showOnboardingStep(2);
@@ -972,7 +963,9 @@ function finishOnboarding(){
   });
   const addr=document.getElementById('ob-address').value.trim();
   const mgr=document.getElementById('ob-manager').value.trim();
+  const emailCheck=document.getElementById('ob-email').value.trim();
   if(!addr||!mgr){alert('Property address and manager name are required.');showOnboardingStep(1);return;}
+  if(!emailCheck){alert('Email is required to sync your data across devices.');showOnboardingStep(1);return;}
   const info={address:addr,manager:mgr,phone:document.getElementById('ob-phone').value.trim(),email:document.getElementById('ob-email').value.trim(),company:document.getElementById('ob-company').value.trim()};
   const id=makePropertyId(addr);
   state.properties[id]=newPropertyData(info);
@@ -980,8 +973,9 @@ function finishOnboarding(){
   state.properties[id].vendors=importedVendors;
   state.activePropertyId=id;
   importedTenants=[];importedVendors=[];
-  const sk=(document.getElementById('ob-sync-key').value||'').trim().replace(/\s+/g,'-');
-  if(sk) setSyncKey(sk);
+  // Use email as sync key (silent — user never sees it)
+  const userEmail=(document.getElementById('ob-email').value||'').trim().toLowerCase();
+  if(userEmail) setSyncKey(userEmail);
   saveData();
   launchApp();
 }
@@ -1205,6 +1199,7 @@ function renderBulkPreview(){
 function finishBulkImport(){
   const mgr=document.getElementById('bulk-manager').value.trim();
   if(!mgr){alert('Please enter your name.');return;}
+  if(!email){alert('Please enter your email address. It is used to sync your data across devices.');return;}
   const props=Object.values(bulkImportData.propertiesMap);
   if(!props.length){alert('Please upload a tenant CSV first.');return;}
   const phone=document.getElementById('bulk-phone').value.trim();
@@ -1222,8 +1217,8 @@ function finishBulkImport(){
     state.properties[id].vendors=[...bulkImportData.vendors];
   });
   state.activePropertyId=firstId;
-  const sk=(document.getElementById('bulk-sync-key').value||'').trim().replace(/\s+/g,'-');
-  if(sk) setSyncKey(sk);
+  // Use email as sync key (silent — user never sees it)
+  if(email) setSyncKey(email.toLowerCase());
   saveData();
   launchApp();
 }
@@ -1250,7 +1245,10 @@ function launchApp(){
 }
 
 function savePropertyInfo(){
-  prop().info={address:document.getElementById('dir-address').value.trim(),manager:document.getElementById('dir-manager').value.trim(),phone:document.getElementById('dir-phone').value.trim(),email:document.getElementById('dir-email').value.trim(),company:document.getElementById('dir-company').value.trim()};
+  const newEmail=document.getElementById('dir-email').value.trim().toLowerCase();
+  prop().info={address:document.getElementById('dir-address').value.trim(),manager:document.getElementById('dir-manager').value.trim(),phone:document.getElementById('dir-phone').value.trim(),email:newEmail,company:document.getElementById('dir-company').value.trim()};
+  // Auto-set sync key from email if not already set
+  if(newEmail && !getSyncKey()) setSyncKey(newEmail);
   saveData();renderPropertySelect();
   document.getElementById('lc-property-display').value=P().address;
   document.getElementById('history-property-label').textContent='Maintenance history — '+P().address;
@@ -1292,10 +1290,10 @@ function showCloudRestorePrompt(){
   body.innerHTML = `
     <div style="text-align:center;padding:1rem 0">
       <div style="font-size:40px;margin-bottom:12px">☁️</div>
-      <div style="font-size:15px;font-weight:700;color:#0f172a;margin-bottom:6px">Restore your data?</div>
-      <div style="font-size:13px;color:#64748b;margin-bottom:20px">We found a sync key saved on this device (<strong>${syncKey}</strong>). Load your data from the cloud?</div>
+      <div style="font-size:15px;font-weight:700;color:#0f172a;margin-bottom:6px">Welcome back!</div>
+      <div style="font-size:13px;color:#64748b;margin-bottom:20px">Load your saved data from the cloud?</div>
       <div style="display:flex;flex-direction:column;gap:10px">
-        <button onclick="restoreFromCloud()" class="btn-primary" style="margin-top:0">Restore from cloud</button>
+        <button onclick="restoreFromCloud()" class="btn-primary" style="margin-top:0">Yes, restore my data</button>
         <button onclick="startFresh()" style="padding:10px;font-size:13px;font-weight:600;font-family:inherit;background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer">Start fresh instead</button>
       </div>
       <div id="restore-status" style="margin-top:12px;font-size:13px"></div>
@@ -2006,9 +2004,9 @@ function renderSyncKeyDisplay(){
   if(!el) return;
   const k = getSyncKey();
   if(k){
-    el.innerHTML = '<div style="font-size:12px;color:#0f172a">Current sync key: <strong style="font-family:monospace;background:#dbeafe;padding:2px 8px;border-radius:4px">'+k+'</strong></div>';
+    el.innerHTML = '<div style="font-size:12px;color:#0f172a">Syncing as: <strong style="background:#dbeafe;padding:2px 8px;border-radius:4px">'+k+'</strong></div>';
   } else {
-    el.innerHTML = '<div style="font-size:12px;color:#b91c1c">No sync key set — data is local only.</div>';
+    el.innerHTML = '<div style="font-size:12px;color:#b91c1c">No email set — data is local only. Add your email in Property Info to enable cloud sync.</div>';
   }
 }
 
@@ -2028,7 +2026,7 @@ function manualSync(){
 function showChangeSyncKey(){
   const el = document.getElementById('cloud-sync-result');
   const current = getSyncKey() || '';
-  el.innerHTML = '<div style="margin-top:8px"><div style="font-size:12px;font-weight:600;color:#0f172a;margin-bottom:4px">Enter new sync key:</div><div style="display:flex;gap:6px"><input id="new-sync-key-input" value="'+current+'" placeholder="my-properties-2024" style="flex:1;padding:7px 10px;font-size:12px;font-family:inherit;background:white;border:1px solid #93c5fd;border-radius:6px"/><button onclick="saveNewSyncKey()" style="padding:7px 14px;font-size:12px;font-weight:600;font-family:inherit;background:#1d4ed8;color:white;border:none;border-radius:6px;cursor:pointer">Save</button></div><div style="font-size:11px;color:#64748b;margin-top:4px">Changing your key will sync all data to the new key.</div></div>';
+  el.innerHTML = '<div style="margin-top:8px"><div style="font-size:12px;font-weight:600;color:#0f172a;margin-bottom:4px">Update sync email:</div><div style="display:flex;gap:6px"><input id="new-sync-key-input" value="'+current+'" placeholder="you@email.com" type="email" style="flex:1;padding:7px 10px;font-size:12px;font-family:inherit;background:white;border:1px solid #93c5fd;border-radius:6px"/><button onclick="saveNewSyncKey()" style="padding:7px 14px;font-size:12px;font-weight:600;font-family:inherit;background:#1d4ed8;color:white;border:none;border-radius:6px;cursor:pointer">Save</button></div><div style="font-size:11px;color:#64748b;margin-top:4px">This is the email you will use to restore your data on any device.</div></div>';
 }
 
 function saveNewSyncKey(){
@@ -2046,23 +2044,23 @@ function saveNewSyncKey(){
 
 async function showRestoreFromCloud(){
   const el = document.getElementById('cloud-sync-result');
-  const k = prompt('Enter your sync key to restore from cloud:', getSyncKey()||'');
+  const k = prompt('Enter the email address you used when setting up the app on your other device:');
   if(!k) return;
   el.innerHTML = '<span style="color:#3b82f6">Loading from cloud...</span>';
-  const data = await loadFromSupabase(k.trim());
+  const data = await loadFromSupabase(k.trim().toLowerCase());
   if(data && data.properties && Object.keys(data.properties).length > 0){
     if(!confirm('Found '+Object.keys(data.properties).length+' propert'+(Object.keys(data.properties).length!==1?'ies':'y')+' in cloud. Replace current local data?')) return;
     state = data;
     if(!state.activePropertyId || !state.properties[state.activePropertyId])
       state.activePropertyId = Object.keys(state.properties)[0];
-    setSyncKey(k.trim());
+    setSyncKey(k.trim().toLowerCase());
     saveData();
     refreshAppForProperty();
     renderSyncKeyDisplay();
     el.innerHTML = '<span style="color:#15803d">✓ Restored successfully</span>';
     setTimeout(()=>el.innerHTML='', 3000);
   } else {
-    el.innerHTML = '<span style="color:#b91c1c">No data found for that sync key.</span>';
+    el.innerHTML = '<span style="color:#b91c1c">No data found for that email address.</span>';
   }
 }
 
