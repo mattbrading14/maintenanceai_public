@@ -1199,11 +1199,11 @@ function renderBulkPreview(){
 function finishBulkImport(){
   const mgr=document.getElementById('bulk-manager').value.trim();
   if(!mgr){alert('Please enter your name.');return;}
+  const email=document.getElementById('bulk-email').value.trim();
   if(!email){alert('Please enter your email address. It is used to sync your data across devices.');return;}
   const props=Object.values(bulkImportData.propertiesMap);
   if(!props.length){alert('Please upload a tenant CSV first.');return;}
   const phone=document.getElementById('bulk-phone').value.trim();
-  const email=document.getElementById('bulk-email').value.trim();
   const company=document.getElementById('bulk-company').value.trim();
   let firstId=null;
   props.forEach(p=>{
