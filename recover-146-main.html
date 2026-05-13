@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>146 Main St Recovery</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f8fafc;color:#0f172a;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+  main{width:min(680px,100%);background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:22px;box-shadow:0 20px 60px rgba(15,23,42,.08)}
+  h1{font-size:22px;margin:0 0 8px}
+  p{font-size:14px;line-height:1.55;color:#475569;margin:0 0 14px}
+  .box{border:1px solid #e2e8f0;background:#f8fafc;border-radius:10px;padding:14px;margin:14px 0}
+  .good{border-color:#86efac;background:#f0fdf4;color:#166534}
+  .warn{border-color:#fed7aa;background:#fff7ed;color:#9a3412}
+  .bad{border-color:#fecaca;background:#fef2f2;color:#991b1b}
+  label{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:#64748b;font-weight:700;margin:14px 0 6px}
+  input{width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:11px 12px;font:inherit;font-size:14px}
+  button,a.button{display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:8px;background:#0f172a;color:#fff;text-decoration:none;font-weight:700;font-size:14px;padding:11px 14px;cursor:pointer;margin:8px 8px 0 0}
+  button.secondary,a.secondary{background:#e2e8f0;color:#0f172a}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  pre{white-space:pre-wrap;font-size:12px;background:#0f172a;color:#e2e8f0;padding:12px;border-radius:8px;overflow:auto}
+</style>
+</head>
+<body>
+<main>
+  <h1>146 Main St Recovery</h1>
+  <p>This page checks the old app storage on this phone/browser. It does not delete or replace anything.</p>
+  <div id="status" class="box">Checking this browser for saved MaintenanceAI data...</div>
+  <div id="summary"></div>
+  <div id="actions" style="display:none">
+    <label for="syncKey">Email or sync key to use for recovery</label>
+    <input id="syncKey" type="email" autocomplete="email" placeholder="you@email.com" />
+    <button id="saveCloud">Save this data to cloud recovery</button>
+    <button id="downloadBackup" class="secondary">Download backup file</button>
+    <div id="result" class="box" style="display:none"></div>
+  </div>
+</main>
+<script>
+const STORAGE_KEY = 'maintenanceai_v2';
+const SB_URL = 'https://muascqnlwwijmifsqdic.supabase.co';
+const SB_KEY = 'sb_publishable_2lHUemABajaLRmsE221E4Q_lyegGjkO';
+const statusEl = document.getElementById('status');
+const summaryEl = document.getElementById('summary');
+const actionsEl = document.getElementById('actions');
+const resultEl = document.getElementById('result');
+let recovered = null;
+
+function showResult(message, type){
+  resultEl.style.display = 'block';
+  resultEl.className = 'box ' + (type || '');
+  resultEl.innerHTML = message;
+}
+
+function describeData(data){
+  const properties = data && data.properties ? Object.values(data.properties) : [];
+  const lines = properties.map((p, index) => {
+    const info = p.info || {};
+    return `${index + 1}. ${info.address || 'Unnamed property'} - ${(p.tenants || []).length} tenants, ${(p.workOrders || []).length} work orders, ${(p.pmTasks || []).length} PM tasks`;
+  });
+  return { count: properties.length, lines };
+}
+
+function loadLocalData(){
+  try{
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if(!raw) return null;
+    const parsed = JSON.parse(raw);
+    if(!parsed || !parsed.properties || !Object.keys(parsed.properties).length) return null;
+    return parsed;
+  }catch(error){
+    return null;
+  }
+}
+
+function downloadBackup(){
+  const blob = new Blob([JSON.stringify({ exportDate: new Date().toISOString(), version: 'v2', properties: recovered.properties, activePropertyId: recovered.activePropertyId }, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'maintenanceai-146-main-backup-' + new Date().toISOString().slice(0,10) + '.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+async function saveToCloud(){
+  const input = document.getElementById('syncKey');
+  const key = input.value.trim().toLowerCase();
+  if(!key){ showResult('Enter your email or a recovery key first.', 'bad'); return; }
+  if(!recovered){ showResult('No saved app data was found on this browser.', 'bad'); return; }
+  document.getElementById('saveCloud').disabled = true;
+  showResult('Saving recovery copy...', 'warn');
+  try{
+    const res = await fetch(SB_URL + '/rest/v1/user_data', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SB_KEY,
+        'Authorization': 'Bearer ' + SB_KEY,
+        'Prefer': 'resolution=merge-duplicates,return=representation'
+      },
+      body: JSON.stringify({ sync_key: key, data: recovered, updated_at: new Date().toISOString() })
+    });
+    if(!res.ok) throw new Error(await res.text());
+    showResult('Saved. Now open <a href="https://maintenanceai-nblc.vercel.app/">the personal app</a>, use the restore box, and enter the same email/key: <strong>' + key.replace(/[<>&]/g, '') + '</strong>.', 'good');
+  }catch(error){
+    showResult('The cloud save did not work. Download the backup file first, then tell Codex this message: ' + String(error.message || error), 'bad');
+  }finally{
+    document.getElementById('saveCloud').disabled = false;
+  }
+}
+
+recovered = loadLocalData();
+if(recovered){
+  const description = describeData(recovered);
+  statusEl.className = 'box good';
+  statusEl.textContent = 'Found saved MaintenanceAI data in this browser.';
+  summaryEl.innerHTML = '<div class="box"><strong>Found ' + description.count + ' propert' + (description.count === 1 ? 'y' : 'ies') + ':</strong><pre>' + description.lines.join('\n').replace(/[<>&]/g, '') + '</pre></div>';
+  actionsEl.style.display = 'block';
+}else{
+  statusEl.className = 'box bad';
+  statusEl.innerHTML = 'No saved MaintenanceAI data was found in this browser storage. Open this recovery page on the same phone and browser where the 146 Main St app used to show your data.';
+}
+
+document.getElementById('saveCloud').addEventListener('click', saveToCloud);
+document.getElementById('downloadBackup').addEventListener('click', downloadBackup);
+</script>
+</body>
+</html>
