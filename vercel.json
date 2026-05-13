@@ -1,0 +1,24 @@
+{
+  "functions": {
+    "api/supabase-keepalive.js": {
+      "memory": 128,
+      "maxDuration": 10
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/supabase-keepalive",
+      "schedule": "30 16 * * *"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/$",
+      "dest": "/index.html"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/$1"
+    }
+  ]
+}
