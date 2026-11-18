@@ -29,7 +29,7 @@ const work=async()=>{worker=await Tesseract.createWorker('eng',1,{workerPath:'ht
 const result=await Promise.race([work(),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Timed out')),90000);})]);if(current!==job||!result)return;
 const text=result.data.text.trim();if(!text){status('No readable text found. Try a clearer screenshot or use a sample.');return;}
 $('read-text').value=text;$('title').value=text.split('\n').map(x=>x.trim()).find(Boolean)||'';
-$('place').value=(text.match(/\b(?:Unit|Office|Suite|Room)\s*[:#]?\s*([^\n]+)/i)||[])[0]||'';
+$('place').value=(text.match(/^(?:Unit|Office|Suite|Room)(?:\s*[:#]\s*|\s+(?=\d))([^\n]+)/im)||[])[0]||'';
 $('when').value=(text.match(/(?:Service date|Ready date|Date|Time|Move-in)\s*:\s*[^\n]+/gi)||[]).join('; ');
 $('review').hidden=false;status('Text read. Review every field; dates are shown as written, not confirmed.');$('review').scrollIntoView({behavior:'smooth',block:'start'});
 }catch{if(current===job)status('The screenshot reader could not finish. Check your connection and try again, or paste the text below.');$('manual').hidden=false;}finally{clearTimeout(timer);if(worker){await worker.terminate();worker=null;}if(current===job)busyState(false);}};
